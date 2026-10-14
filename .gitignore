@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Node
+node_modules/
+dist/
+
+# Secrets and env files (never commit)
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+*.pfx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
