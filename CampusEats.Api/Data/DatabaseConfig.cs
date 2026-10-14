@@ -182,6 +182,20 @@ public static class DatabaseConfig
                     sb.Append("Trust Server Certificate=true;");
                 }
 
+                // Parse channel_binding query parameter
+                var channelBinding = queryParams["channel_binding"];
+                if (!string.IsNullOrWhiteSpace(channelBinding))
+                {
+                    var npgsqlChannelBinding = channelBinding.ToLowerInvariant() switch
+                    {
+                        "require" => "Require",
+                        "prefer" => "Prefer",
+                        "disable" => "Disable",
+                        _ => "Prefer"
+                    };
+                    sb.Append($"Channel Binding={npgsqlChannelBinding};");
+                }
+
                 // If connection pooling parameters or endpoint options exist in query
                 var endpoint = queryParams["endpoint"];
                 if (!string.IsNullOrWhiteSpace(endpoint))

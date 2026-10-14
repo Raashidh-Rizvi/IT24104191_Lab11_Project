@@ -6,7 +6,11 @@
 **/obj
 **/.env
 **/.env.*
+**/*.env
+deployment/
 !**/.env.example
+!**/*.env.*.example
+!**/*.env.example
 **/node_modules
 **/dist
 campuseats-web/

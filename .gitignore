@@ -11,11 +11,15 @@ dist/
 # Secrets and environment files (NEVER COMMIT)
 .env
 .env.*
+*.env
 **/.env
 **/.env.*
+**/*.env
+deployment/*.env
 !.env.example
 !**/.env.example
 !**/.env.*.example
+!**/*.env.example
 appsettings.*.local.json
 *.pfx
 
