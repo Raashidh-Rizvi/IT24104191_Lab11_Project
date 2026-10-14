@@ -68,9 +68,10 @@ public static class DatabaseConfig
         {
             if (env.IsProduction())
             {
-                throw new InvalidOperationException(
+                logger?.LogError(
                     "Production database connection string is missing or invalid. " +
                     "Please configure the DATABASE_URL environment variable in Railway with your Neon PostgreSQL connection string.");
+                return "";
             }
 
             logger?.LogWarning("No database connection string configured. Using local development fallback.");

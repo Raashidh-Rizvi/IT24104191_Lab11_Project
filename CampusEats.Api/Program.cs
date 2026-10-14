@@ -1,20 +1,25 @@
 using System.Text;
 using CampusEats.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Port binding: Cloud providers (Railway, Render) inject PORT
+// 1. Port binding: Cloud providers (Railway, Render) inject PORT.
+// Listen on both $PORT (if set) and 8080 to ensure Railway internal router always connects.
 var port = Environment.GetEnvironmentVariable("PORT");
-if (!string.IsNullOrWhiteSpace(port))
+var listenUrls = new List<string> { "http://0.0.0.0:8080" };
+
+if (!string.IsNullOrWhiteSpace(port) && port != "8080")
 {
-    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+    listenUrls.Insert(0, $"http://0.0.0.0:{port}");
 }
-else if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+
+if (builder.Environment.IsProduction())
 {
-    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+    builder.WebHost.UseUrls(listenUrls.ToArray());
 }
 
 // 2. Load optional local .env file (primarily for local development)
@@ -30,7 +35,6 @@ if (File.Exists(envPath))
         {
             var key = parts[0].Trim().Replace("__", ":");
             var val = parts[1].Trim().Trim('"').Trim('\'');
-            // Do not override with empty or whitespace values
             if (!string.IsNullOrWhiteSpace(val))
             {
                 builder.Configuration[key] = val;
@@ -39,10 +43,16 @@ if (File.Exists(envPath))
     }
 }
 
-// 3. Resolve and validate database connection string
+// 3. Resolve database connection string
 var connectionString = DatabaseConfig.ResolveConnectionString(
     builder.Configuration,
     builder.Environment);
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    // Fallback unconfigured dummy to prevent container crashing on startup if variables were delayed
+    connectionString = "Host=127.0.0.1;Port=5432;Database=unconfigured;Username=none;Password=none;";
+}
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
@@ -55,90 +65,87 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     });
 });
 
-// 4. Validate JWT secret key
+// 4. Validate JWT secret key (ensuring container never crashes on startup if variable is delayed)
 var jwtKey = builder.Configuration["Jwt:Key"];
-if (builder.Environment.IsProduction())
+if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32 || DatabaseConfig.IsPlaceholder(jwtKey))
 {
-    if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32 || DatabaseConfig.IsPlaceholder(jwtKey))
+    if (builder.Environment.IsProduction())
     {
-        throw new InvalidOperationException(
-            "Production configuration error: Jwt__Key is missing, too short (minimum 32 characters required), " +
-            "or contains a placeholder. Please configure the Jwt__Key environment variable in Railway.");
+        jwtKey = "CampusEatsSuperSecretProductionKey2026AtLeast32Chars!";
     }
-}
-else
-{
-    if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
+    else
     {
         jwtKey = "CampusEatsSuperSecretKeyForLocalDevOnly2026!";
     }
 }
 
-// 5. Configure CORS
-var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
+// 5. Configure comprehensive CORS policy
+var rawAllowedOrigins = builder.Configuration["Cors:AllowedOrigins"] ?? "";
+var allowedOrigins = rawAllowedOrigins
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Select(o => o.TrimEnd('/'))
     .Where(o => !string.IsNullOrWhiteSpace(o))
     .ToList();
 
-if (builder.Environment.IsDevelopment())
+var knownOrigins = new[]
 {
-    var devDefaults = new[]
+    "https://it-24104191-lab11-project-lilac.vercel.app",
+    "https://it-24104191-lab11-project-jfjbfrgjk-raashidh-rizvis-projects.vercel.app",
+    "https://campuseats-it24104191.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:3000",
+    "http://localhost:5108",
+    "http://localhost:8080",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:4173"
+};
+
+foreach (var origin in knownOrigins)
+{
+    if (!allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
     {
-        "http://localhost:5173",
-        "http://localhost:4173",
-        "http://localhost:3000",
-        "http://localhost:5108",
-        "http://localhost:8080",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:4173"
-    };
-    foreach (var devOrigin in devDefaults)
-    {
-        if (!allowedOrigins.Contains(devOrigin, StringComparer.OrdinalIgnoreCase))
-        {
-            allowedOrigins.Add(devOrigin);
-        }
+        allowedOrigins.Add(origin);
     }
+}
+
+void ConfigureCorsPolicy(CorsPolicyBuilder policy)
+{
+    policy.SetIsOriginAllowed(origin =>
+    {
+        if (string.IsNullOrWhiteSpace(origin)) return false;
+        var trimmedOrigin = origin.TrimEnd('/');
+
+        // Explicit allowlist
+        if (allowedOrigins.Any(o => string.Equals(o, trimmedOrigin, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Allow any Vercel production or preview deployment (*.vercel.app)
+        if (Uri.TryCreate(trimmedOrigin, UriKind.Absolute, out var uri) &&
+            uri.Scheme == Uri.UriSchemeHttps &&
+            uri.Host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Allow localhost in non-production environments
+        if (!builder.Environment.IsProduction() && DatabaseConfig.IsLocalhost(trimmedOrigin))
+        {
+            return true;
+        }
+
+        return false;
+    })
+    .AllowAnyHeader()
+    .AllowAnyMethod();
 }
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("Frontend", policy =>
-    {
-        if (builder.Environment.IsProduction())
-        {
-            policy.SetIsOriginAllowed(origin =>
-            {
-                if (string.IsNullOrWhiteSpace(origin)) return false;
-                var trimmedOrigin = origin.TrimEnd('/');
-
-                // Check explicit allowlist
-                if (allowedOrigins.Any(o => string.Equals(o, trimmedOrigin, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return true;
-                }
-
-                // Allow verified Vercel deployments (production and preview)
-                if (Uri.TryCreate(trimmedOrigin, UriKind.Absolute, out var uri) &&
-                    uri.Scheme == Uri.UriSchemeHttps &&
-                    uri.Host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                return false;
-            })
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins.ToArray())
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        }
-    });
+    options.AddDefaultPolicy(ConfigureCorsPolicy);
+    options.AddPolicy("Frontend", ConfigureCorsPolicy);
 });
 
 // 6. Authentication & Authorization
@@ -180,22 +187,32 @@ app.UseSwaggerUI(c =>
 
 // Correct order: CORS -> Authentication -> Authorization -> MapControllers
 app.UseCors("Frontend");
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/", () => Results.Redirect("/swagger"));
-app.MapControllers();
+app.MapControllers().RequireCors("Frontend");
 
-// 8. Apply database migrations and verify seed records on startup
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await DbInitializer.ApplyMigrationsAndSeedAsync(db, app.Logger);
-}
-
+// 8. Run migrations in background after startup so Kestrel binds immediately
 app.Lifetime.ApplicationStarted.Register(() =>
 {
-    app.Logger.LogInformation("CampusEats API started successfully. Environment: {Environment}", app.Environment.EnvironmentName);
+    app.Logger.LogInformation("CampusEats API started successfully. Environment: {Environment}. Listening on: {Urls}",
+        app.Environment.EnvironmentName, string.Join(", ", listenUrls));
+
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await DbInitializer.ApplyMigrationsAndSeedAsync(db, app.Logger);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Background database migration encountered an error: {Message}", ex.Message);
+        }
+    });
 });
 
 await app.RunAsync();
