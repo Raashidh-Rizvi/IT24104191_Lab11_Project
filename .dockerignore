@@ -1,0 +1,13 @@
+**/.git
+**/.github
+**/.vs
+**/.idea
+**/bin
+**/obj
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+campuseats-web/
+*.docx

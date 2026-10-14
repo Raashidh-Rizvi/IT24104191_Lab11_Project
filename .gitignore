@@ -1,22 +1,26 @@
-# .NET
+# .NET build artifacts
 bin/
 obj/
 *.user
 .vs/
 
-# Node
+# Node & Frontend build artifacts
 node_modules/
 dist/
 
-# Secrets and env files (never commit)
+# Secrets and environment files (NEVER COMMIT)
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
+!**/.env.*.example
 appsettings.*.local.json
 *.pfx
 
-# OS / IDE
+# Cloud & tooling
+.neon
 .DS_Store
 Thumbs.db
 .idea/
-.neon

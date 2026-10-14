@@ -9,17 +9,11 @@ namespace CampusEats.Api.Controllers;
 [Route("api/[controller]")]
 public class MenuController(AppDbContext db, ILogger<MenuController> logger) : ControllerBase
 {
-    private static readonly List<MenuItem> FallbackItems =
-    [
-        new() { Id = 1, Name = "Chicken Fried Rice", Description = "Wok-fried rice with chicken and egg", Price = 750m, Category = "Mains" },
-        new() { Id = 2, Name = "Vegetable Kottu", Description = "Chopped roti with fresh vegetables", Price = 650m, Category = "Mains" },
-        new() { Id = 3, Name = "Chicken Kottu", Description = "Chopped roti with chicken and spices", Price = 850m, Category = "Mains" },
-        new() { Id = 4, Name = "Fish Bun", Description = "Soft bun with spicy fish filling", Price = 90m, Category = "Snacks" },
-        new() { Id = 5, Name = "Egg Hopper", Description = "Crispy hopper with a soft egg", Price = 120m, Category = "Snacks" },
-        new() { Id = 6, Name = "Iced Milk Tea", Description = "Cold and sweet milk tea", Price = 200m, Category = "Drinks" },
-        new() { Id = 7, Name = "Watalappan", Description = "Coconut milk and jaggery pudding", Price = 300m, Category = "Desserts" }
-    ];
-
+    /// <summary>
+    /// Retrieves all menu items directly from PostgreSQL.
+    /// Exposes 'X-Data-Source: PostgreSQL' header.
+    /// Returns HTTP 503 if the database is unavailable.
+    /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<MenuItem>>> GetAll()
     {
@@ -31,35 +25,45 @@ public class MenuController(AppDbContext db, ILogger<MenuController> logger) : C
                 .ThenBy(m => m.Name)
                 .ToListAsync();
 
-            if (items.Count > 0)
-            {
-                return Ok(items);
-            }
-
-            return Ok(FallbackItems);
+            Response.Headers.Append("X-Data-Source", "PostgreSQL");
+            return Ok(items);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Database query failed. Returning seeded fallback menu items: {Message}", ex.Message);
-            Response.Headers.Append("X-Data-Source", "Fallback");
-            return Ok(FallbackItems);
+            logger.LogError(ex, "Database query failed while retrieving menu items: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Could not retrieve the menu. The database is currently unreachable.",
+                error = "DatabaseUnavailable"
+            });
         }
     }
 
+    /// <summary>
+    /// Retrieves a single menu item by ID directly from PostgreSQL.
+    /// </summary>
     [HttpGet("{id:int}")]
     public async Task<ActionResult<MenuItem>> GetById(int id)
     {
         try
         {
             var item = await db.MenuItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id);
-            if (item is not null) return Ok(item);
+            if (item is null)
+            {
+                return NotFound(new { message = $"Menu item with ID {id} not found." });
+            }
+
+            Response.Headers.Append("X-Data-Source", "PostgreSQL");
+            return Ok(item);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Database query failed for item id {Id}", id);
+            logger.LogError(ex, "Database query failed while retrieving menu item ID {Id}: {Message}", id, ex.Message);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Could not retrieve the menu item. The database is currently unreachable.",
+                error = "DatabaseUnavailable"
+            });
         }
-
-        var fallback = FallbackItems.FirstOrDefault(m => m.Id == id);
-        return fallback is not null ? Ok(fallback) : NotFound();
     }
 }

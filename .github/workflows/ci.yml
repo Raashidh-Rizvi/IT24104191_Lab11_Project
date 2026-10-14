@@ -8,26 +8,50 @@ on:
 
 jobs:
   frontend:
+    name: Frontend (React + Vite)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: campuseats-web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: campuseats-web/package-lock.json
-      - run: npm ci
-      - run: npm run build
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint frontend code
+        run: npm run lint
+
+      - name: Build frontend static bundle
+        run: npm run build
 
   backend:
+    name: Backend (ASP.NET Core 8 API)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - run: dotnet restore CampusEats.Api/CampusEats.Api.csproj
-      - run: dotnet build CampusEats.Api/CampusEats.Api.csproj -c Release --no-restore
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore CampusEats.Api/CampusEats.Api.csproj
+          dotnet restore CampusEats.Api.Tests/CampusEats.Api.Tests.csproj
+
+      - name: Build API project
+        run: dotnet build CampusEats.Api/CampusEats.Api.csproj -c Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test CampusEats.Api.Tests/CampusEats.Api.Tests.csproj -c Release
