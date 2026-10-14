@@ -32,11 +32,13 @@ if (File.Exists(envPath))
 }
 
 // Support both ConnectionStrings:Default and Railway's DATABASE_URL / POSTGRES_URL
-var rawConn = builder.Configuration.GetConnectionString("Default")
-    ?? builder.Configuration["DATABASE_URL"]
-    ?? builder.Configuration["POSTGRES_URL"]
-    ?? Environment.GetEnvironmentVariable("DATABASE_URL")
-    ?? Environment.GetEnvironmentVariable("POSTGRES_URL");
+var rawConn = new[] {
+    builder.Configuration["DATABASE_URL"],
+    builder.Configuration.GetConnectionString("Default"),
+    builder.Configuration["POSTGRES_URL"],
+    Environment.GetEnvironmentVariable("DATABASE_URL"),
+    Environment.GetEnvironmentVariable("POSTGRES_URL")
+}.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
 
 var connectionString = FormatPostgreSqlConnectionString(rawConn);
 if (string.IsNullOrWhiteSpace(connectionString))
